@@ -1,0 +1,98 @@
+<!DOCTYPE html><html><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width"/><title>tattsun.me</title><meta name="description" content="技術情報とか日々の日記"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:creator" content="@tattsundev"/><meta property="og:title" content="tattsun.me"/><meta property="og:description" content="技術情報とか日々の日記"/><meta property="og:locale" content="ja_JP"/><meta property="og:site_name" content="tattsun.me"/><meta name="robots" content="index,follow"/><meta property="og:url" content="https://tattsun.me/articles/2022-08-13-the-elements-of-computing-systems-05"/><meta property="og:type" content="website"/><meta name="next-head-count" content="13"/><link rel="preload" href="/_next/static/css/8262982369c17f00.css" as="style"/><link rel="stylesheet" href="/_next/static/css/8262982369c17f00.css" data-n-g=""/><noscript data-n-css=""></noscript><script defer="" nomodule="" src="/_next/static/chunks/polyfills-c67a75d1b6f99dc8.js"></script><script src="/_next/static/chunks/webpack-7ee66019f7f6d30f.js" defer=""></script><script src="/_next/static/chunks/framework-9b5d6ec4444c80fa.js" defer=""></script><script src="/_next/static/chunks/main-3123a443c688934f.js" defer=""></script><script src="/_next/static/chunks/pages/_app-d5046a2dfcd592db.js" defer=""></script><script src="/_next/static/chunks/pages/articles/%5Bslug%5D-49bf4a234109a9fb.js" defer=""></script><script src="/_next/static/Zn2wvVpnTaKvdqaPFvtjL/_buildManifest.js" defer=""></script><script src="/_next/static/Zn2wvVpnTaKvdqaPFvtjL/_ssgManifest.js" defer=""></script></head><body><div id="__next"><div class="flex flex-col min-h-screen"><header class="sticky top-0 border-b z-10 bg-white"><div class="max-w-4xl mx-auto flex justify-between items-center h-12 text-xl px-4"><a href="/">tattsun.me</a></div></header><main class="flex-1 max-w-4xl w-full mx-auto px-4 mt-5"><div class="prose prose-lg max-w-none"><h1></h1><div>2022-08-13</div><div><p>最近、<a href="https://www.oreilly.co.jp/books/9784873117126/">コンピュータシステムの理論と実装</a>を読みながら手を動かしている。</p>
+<p>ブログの試運用も兼ねて読書ログを記録しておく。</p>
+<p><img src="https://i.imgur.com/4eUxFS6.png" alt="Imgur"></p>
+<h2 id="ソースコード">ソースコード</h2>
+<p>一応以下のソースでテストは通ったが、CPUの比較周りのコードがかなり煩雑になってしまった…。</p>
+<h3 id="memoryhdl">Memory.hdl</h3>
+<div class="remark-highlight"><pre class="language-hdl"><code class="language-hdl">CHIP Memory {
+    IN in[16], load, address[15];
+    OUT out[16];
+
+    PARTS:
+    DMux(in=load, sel=address[14], a=loadram, b=loadio);
+    DMux(in=loadio, sel=address[13], a=loadscreen);
+
+    RAM16K(in=in, load=loadram, address=address[0..13], out=outram);
+    Screen(in=in, load=loadscreen, address=address[0..12], out=outscreen);
+    Keyboard(out=outkeyboard);
+
+    Mux16(a=outscreen, b=outkeyboard, sel=address[13], out=outio);
+    Mux16(a=outram, b=outio, sel=address[14], out=out);
+}</code></pre></div>
+<h3 id="cpuhdl">CPU.hdl</h3>
+<div class="remark-highlight"><pre class="language-hdl"><code class="language-hdl">CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    Mux16(a=instruction, b=outALU, sel=instruction[15], out=inA);
+    Not(in=instruction[15], out=instA);
+
+    Or(a=instA, b=instruction[5], out=saveA);
+    ARegister(in=inA, load=saveA, out=outA, out[0..14]=addressM);
+
+    Mux16(a=outA, b=inM, sel=instruction[12], out=outAorM);
+
+    And(a=instruction[4], b=instruction[15], out=loadD);
+    DRegister(in=outALU, load=loadD, out=outD);
+
+    ALU(x=outD, y=outAorM, zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=outM, out=outALU, zr=zr, ng=ng);
+
+    And(a=instruction[15], b=instruction[3], out=writeM);
+
+    // Compare
+    Not(in=zr, out=notzr);
+    Not(in=ng, out=notng);
+
+    And(a=notzr, b=notng, out=jgt);
+    And(a=zr, b=true, out=jeq);
+    Or(a=zr, b=notng, out=jge);
+    And(a=notzr, b=ng, out=jlt);
+    And(a=notzr, b=true, out=jne);
+    Or(a=zr, b=ng, out=jle);
+
+
+    DMux8Way(in=true, sel=instruction[0..2], a=Inojmp, b=Ijgt, c=Ijeq, d=Ijge, e=Ijlt, f=Ijne, g=Ijle, h=Ijmp);
+
+    And(a=jgt, b=Ijgt, out=Rjgt);
+    And(a=jeq, b=Ijeq, out=Rjeq);
+    And(a=jge, b=Ijge, out=Rjge);
+    And(a=jlt, b=Ijlt, out=Rjlt);
+    And(a=jne, b=Ijne, out=Rjne);
+    And(a=jle, b=Ijle, out=Rjle);
+    
+    Or(a=Rjgt, b=Rjeq, out=w1);
+    Or(a=w1, b=Rjge, out=w2);
+    Or(a=w2, b=Rjlt, out=w3);
+    Or(a=w3, b=Rjne, out=w4);
+    Or(a=w4, b=Rjle, out=w5);
+    Or(a=w5, b=Rjgt, out=w6);
+    Or(a=w6, b=Ijmp, out=w7);
+    And(a=w7, b=instruction[15], out=loadPC);
+    Not(in=loadPC, out=notLoadPC);
+    
+    Or(a=Inojmp, b=instA, out=x1);
+    Or(a=x1, b=notLoadPC, out=Rnojmp);
+
+    PC(in=outA, load=loadPC, inc=Rnojmp, reset=reset, out[0..14]=pc);
+}</code></pre></div>
+<h3 id="computerhdl">Computer.hdl</h3>
+<div class="remark-highlight"><pre class="language-hdl"><code class="language-hdl">CHIP Computer {
+
+    IN reset;
+
+    PARTS:
+    
+    ROM32K(address=pc, out=instruction);
+    CPU(inM=inM, instruction=instruction, reset=reset, outM=outM, writeM=writeM, addressM=addressM, pc=pc);
+    Memory(in=outM, load=writeM, address=addressM, out=inM);
+}</code></pre></div></div></div></main><footer class="bg-gray-100"><div class="max-w-4xl w-full mx-auto h-24 flex items-center-justify-center pt-4 px-4"><div>2022 tatsun.me</div></div></footer></div></div><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"article":{"slug":"2022-08-13-the-elements-of-computing-systems-05","matter":{"titile":"コンピュータシステムの理論と実装　第５章　コンピュータアーキテクチャ"},"date":"2022-08-13","content":"\u003cp\u003e最近、\u003ca href=\"https://www.oreilly.co.jp/books/9784873117126/\"\u003eコンピュータシステムの理論と実装\u003c/a\u003eを読みながら手を動かしている。\u003c/p\u003e\n\u003cp\u003eブログの試運用も兼ねて読書ログを記録しておく。\u003c/p\u003e\n\u003cp\u003e\u003cimg src=\"https://i.imgur.com/4eUxFS6.png\" alt=\"Imgur\"\u003e\u003c/p\u003e\n\u003ch2 id=\"ソースコード\"\u003eソースコード\u003c/h2\u003e\n\u003cp\u003e一応以下のソースでテストは通ったが、CPUの比較周りのコードがかなり煩雑になってしまった…。\u003c/p\u003e\n\u003ch3 id=\"memoryhdl\"\u003eMemory.hdl\u003c/h3\u003e\n\u003cdiv class=\"remark-highlight\"\u003e\u003cpre class=\"language-hdl\"\u003e\u003ccode class=\"language-hdl\"\u003eCHIP Memory {\n    IN in[16], load, address[15];\n    OUT out[16];\n\n    PARTS:\n    DMux(in=load, sel=address[14], a=loadram, b=loadio);\n    DMux(in=loadio, sel=address[13], a=loadscreen);\n\n    RAM16K(in=in, load=loadram, address=address[0..13], out=outram);\n    Screen(in=in, load=loadscreen, address=address[0..12], out=outscreen);\n    Keyboard(out=outkeyboard);\n\n    Mux16(a=outscreen, b=outkeyboard, sel=address[13], out=outio);\n    Mux16(a=outram, b=outio, sel=address[14], out=out);\n}\u003c/code\u003e\u003c/pre\u003e\u003c/div\u003e\n\u003ch3 id=\"cpuhdl\"\u003eCPU.hdl\u003c/h3\u003e\n\u003cdiv class=\"remark-highlight\"\u003e\u003cpre class=\"language-hdl\"\u003e\u003ccode class=\"language-hdl\"\u003eCHIP CPU {\n\n    IN  inM[16],         // M value input  (M = contents of RAM[A])\n        instruction[16], // Instruction for execution\n        reset;           // Signals whether to re-start the current\n                         // program (reset==1) or continue executing\n                         // the current program (reset==0).\n\n    OUT outM[16],        // M value output\n        writeM,          // Write to M? \n        addressM[15],    // Address in data memory (of M)\n        pc[15];          // address of next instruction\n\n    PARTS:\n    Mux16(a=instruction, b=outALU, sel=instruction[15], out=inA);\n    Not(in=instruction[15], out=instA);\n\n    Or(a=instA, b=instruction[5], out=saveA);\n    ARegister(in=inA, load=saveA, out=outA, out[0..14]=addressM);\n\n    Mux16(a=outA, b=inM, sel=instruction[12], out=outAorM);\n\n    And(a=instruction[4], b=instruction[15], out=loadD);\n    DRegister(in=outALU, load=loadD, out=outD);\n\n    ALU(x=outD, y=outAorM, zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=outM, out=outALU, zr=zr, ng=ng);\n\n    And(a=instruction[15], b=instruction[3], out=writeM);\n\n    // Compare\n    Not(in=zr, out=notzr);\n    Not(in=ng, out=notng);\n\n    And(a=notzr, b=notng, out=jgt);\n    And(a=zr, b=true, out=jeq);\n    Or(a=zr, b=notng, out=jge);\n    And(a=notzr, b=ng, out=jlt);\n    And(a=notzr, b=true, out=jne);\n    Or(a=zr, b=ng, out=jle);\n\n\n    DMux8Way(in=true, sel=instruction[0..2], a=Inojmp, b=Ijgt, c=Ijeq, d=Ijge, e=Ijlt, f=Ijne, g=Ijle, h=Ijmp);\n\n    And(a=jgt, b=Ijgt, out=Rjgt);\n    And(a=jeq, b=Ijeq, out=Rjeq);\n    And(a=jge, b=Ijge, out=Rjge);\n    And(a=jlt, b=Ijlt, out=Rjlt);\n    And(a=jne, b=Ijne, out=Rjne);\n    And(a=jle, b=Ijle, out=Rjle);\n    \n    Or(a=Rjgt, b=Rjeq, out=w1);\n    Or(a=w1, b=Rjge, out=w2);\n    Or(a=w2, b=Rjlt, out=w3);\n    Or(a=w3, b=Rjne, out=w4);\n    Or(a=w4, b=Rjle, out=w5);\n    Or(a=w5, b=Rjgt, out=w6);\n    Or(a=w6, b=Ijmp, out=w7);\n    And(a=w7, b=instruction[15], out=loadPC);\n    Not(in=loadPC, out=notLoadPC);\n    \n    Or(a=Inojmp, b=instA, out=x1);\n    Or(a=x1, b=notLoadPC, out=Rnojmp);\n\n    PC(in=outA, load=loadPC, inc=Rnojmp, reset=reset, out[0..14]=pc);\n}\u003c/code\u003e\u003c/pre\u003e\u003c/div\u003e\n\u003ch3 id=\"computerhdl\"\u003eComputer.hdl\u003c/h3\u003e\n\u003cdiv class=\"remark-highlight\"\u003e\u003cpre class=\"language-hdl\"\u003e\u003ccode class=\"language-hdl\"\u003eCHIP Computer {\n\n    IN reset;\n\n    PARTS:\n    \n    ROM32K(address=pc, out=instruction);\n    CPU(inM=inM, instruction=instruction, reset=reset, outM=outM, writeM=writeM, addressM=addressM, pc=pc);\n    Memory(in=outM, load=writeM, address=addressM, out=inM);\n}\u003c/code\u003e\u003c/pre\u003e\u003c/div\u003e"}},"__N_SSG":true},"page":"/articles/[slug]","query":{"slug":"2022-08-13-the-elements-of-computing-systems-05"},"buildId":"Zn2wvVpnTaKvdqaPFvtjL","isFallback":false,"gsp":true,"scriptLoader":[]}</script></body></html>
