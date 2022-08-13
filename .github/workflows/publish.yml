@@ -1,0 +1,30 @@
+name: publish
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          repository: tattsun/mysite
+      - uses: actions/checkout@v3
+        with:
+          path: tattsun.me
+      - uses: actions/setup-node@v2
+        with: 
+          node-version: 16.x
+          cache: npm
+      - run: npm install
+      - run: npm run export
+        env:
+          MYSITE_MARKDOWN_DIR: ./tattsun.me/markdown
+      - uses: peaceiris/actions-gh-pages@v3
+        with:
+          cname: tattsun.me
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: out
